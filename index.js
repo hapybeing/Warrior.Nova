@@ -37,14 +37,14 @@ app.use(limiter);
 app.use(express.json());
 
 const stealthHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://comick.io/'
 };
 
 // ==========================================
 // THE BATTERING RAM: COMICK API EXTRACTOR
 // ==========================================
 
-// Weapon 1: Steal the Chapters
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
@@ -52,22 +52,43 @@ app.get('/api/scrape/chapters', async (req, res) => {
 
         console.log(`[Battering Ram] Engaging Comick API for: ${title}`);
 
-        // 1. Search for the Manga
         const cleanTitle = title.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-        const searchUrl = `https://api.comick.io/v1.0/search?q=${encodeURIComponent(cleanTitle)}&limit=1`;
-        
-        const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
-        
-        if (!searchRes.data || searchRes.data.length === 0) {
-            console.log(`[Battering Ram] Target not found on Comick.`);
+        const encoded = encodeURIComponent(cleanTitle);
+
+        // THE MULTI-BREACH: Tests every known domain and uses the Tachiyomi disguise
+        const targets = [
+            `https://api.comick.io/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`,
+            `https://api.comick.dev/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`,
+            `https://api.comick.fun/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`
+        ];
+
+        let searchRes = null;
+        let successfulDomain = '';
+
+        for (const url of targets) {
+            try {
+                console.log(`[Battering Ram] Testing breach point: ${new URL(url).hostname}...`);
+                searchRes = await axios.get(url, { headers: stealthHeaders });
+                if (searchRes.data && searchRes.data.length > 0) {
+                    successfulDomain = new URL(url).hostname;
+                    console.log(`[Battering Ram] Wall breached at ${successfulDomain}!`);
+                    break; 
+                }
+            } catch (e) {
+                console.log(`[Battering Ram] Point blocked (404/403). Switching doors...`);
+            }
+        }
+
+        if (!searchRes || !searchRes.data || searchRes.data.length === 0) {
+            console.log(`[Battering Ram] All breach points failed or target missing.`);
             return res.json({ chapters: [], source: 'comick' });
         }
 
         const targetHid = searchRes.data[0].hid;
         console.log(`[Battering Ram] Target acquired. HID: ${targetHid}`);
 
-        // 2. Extract Chapters
-        const chapUrl = `https://api.comick.io/comic/${targetHid}/chapters?lang=en&limit=500`;
+        // Extract Chapters from the domain that worked
+        const chapUrl = `https://${successfulDomain}/comic/${targetHid}/chapters?lang=en&limit=500&tachiyomi=true`;
         const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
         
         let chapters = [];
@@ -88,18 +109,22 @@ app.get('/api/scrape/chapters', async (req, res) => {
         res.json({ chapters: chapters, source: 'comick' });
 
     } catch (error) {
-        console.error('[Battering Ram] Breach Failed:', error.message);
+        console.error('[Battering Ram] Critical System Failure:', error.message);
         res.status(500).json({ error: 'Failed to breach target servers' });
     }
 });
 
-// Weapon 2: Steal the Images
 app.get('/api/scrape/images', async (req, res) => {
     try {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        const chapRes = await axios.get(`https://api.comick.io/chapter/${chapterId}`, { headers: stealthHeaders });
+        let chapRes;
+        try {
+            chapRes = await axios.get(`https://api.comick.io/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
+        } catch (e) {
+            chapRes = await axios.get(`https://api.comick.dev/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
+        }
         
         if (chapRes.data && chapRes.data.chapter && chapRes.data.chapter.images) {
             const images = chapRes.data.chapter.images.map(img => img.url);
@@ -115,7 +140,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Comick API Ram Loaded",
+        weapons: "Multi-Breach Comick Ram Loaded",
         shields: "Raised"
     });
 });
@@ -123,4 +148,3 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Warrior.Nova standing guard on port ${PORT}`);
 });
-
