@@ -29,7 +29,7 @@ app.use(limiter);
 app.use(express.json());
 
 // ==========================================
-// THE MANGAPILL EXTRACTOR (DIAGNOSTIC MODE)
+// THE MANGAPILL PRECISION EXTRACTOR
 // ==========================================
 
 const PILL_BASE = 'https://mangapill.com';
@@ -47,19 +47,13 @@ app.get('/api/scrape/chapters', async (req, res) => {
         // 1. Search MangaPill's HTML
         const searchUrl = `${PILL_BASE}/search?q=${encodeURIComponent(title)}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
-        
-        // --- THE DIAGNOSTIC FLASHLIGHT ---
-        // This will print the first 300 characters of exactly what MangaPill handed us
-        console.log(`[Diagnostic] Raw HTML received:`, searchRes.data.substring(0, 300));
-        // ---------------------------------
-
         const $search = cheerio.load(searchRes.data);
 
-        // Find the first manga result link
-        const firstResult = $search('.grid a').first().attr('href');
+        // PRECISION TARGETING: Find the first link that explicitly goes to a manga page
+        const firstResult = $search('a[href^="/manga/"]').first().attr('href');
         
         if (!firstResult) {
-            console.log(`[Extractor] Target not found on MangaPill. (Check the diagnostic log above to see what they actually sent us!)`);
+            console.log(`[Extractor] Target not found on MangaPill.`);
             return res.json({ chapters: [], source: 'mangapill' });
         }
 
@@ -72,18 +66,20 @@ app.get('/api/scrape/chapters', async (req, res) => {
         
         let chapters = [];
         
-        // MangaPill uses a div with id 'chapters' holding all chapter links
-        $manga('#chapters a').each((i, el) => {
+        // PRECISION TARGETING: Find all links that explicitly go to a chapter
+        $manga('a[href^="/chapter/"]').each((i, el) => {
             const chapUrl = $manga(el).attr('href');
-            const chapText = $manga(el).text().trim().replace(/Chapter /i, '');
+            const chapText = $manga(el).text().trim().replace(/Chapter /i, '') || 'Oneshot';
             
-            // Encode the URL so it travels safely
             const safeId = Buffer.from(chapUrl).toString('base64');
             
-            chapters.push({
-                id: safeId,
-                attributes: { chapter: chapText, title: '' }
-            });
+            // Prevent duplicates just in case MangaPill lists a chapter twice
+            if (!chapters.find(c => c.id === safeId)) {
+                chapters.push({
+                    id: safeId,
+                    attributes: { chapter: chapText, title: '' }
+                });
+            }
         });
 
         // MangaPill lists chapters newest first, let's reverse it so Chapter 1 is at the top
@@ -107,14 +103,14 @@ app.get('/api/scrape/images', async (req, res) => {
         const targetPath = Buffer.from(chapterId, 'base64').toString('ascii');
         const chapUrl = `${PILL_BASE}${targetPath}`;
         
-        console.log(`[Extractor] Ripping images from chapter...`);
+        console.log(`[Extractor] Ripping images from ${chapUrl}...`);
         const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
         const $ = cheerio.load(chapRes.data);
         
         let images = [];
         
-        // MangaPill lazy-loads images using 'data-src' inside the picture tag
-        $('picture img').each((i, el) => {
+        // MangaPill lazy-loads images, grab data-src first, then fallback to src
+        $('picture img, img[data-src]').each((i, el) => {
             const imgUrl = $(el).attr('data-src') || $(el).attr('src');
             if (imgUrl) images.push(imgUrl);
         });
@@ -130,7 +126,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "MangaPill Extractor (Diagnostic Mode)",
+        weapons: "MangaPill Precision Extractor",
         shields: "Raised"
     });
 });
@@ -138,3 +134,4 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Warrior.Nova standing guard on port ${PORT}`);
 });
+
