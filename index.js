@@ -44,12 +44,10 @@ app.get('/api/scrape/chapters', async (req, res) => {
 
         console.log(`[Extractor] Searching MangaPill for: ${title}`);
 
-        // 1. Search MangaPill's HTML
         const searchUrl = `${PILL_BASE}/search?q=${encodeURIComponent(title)}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $search = cheerio.load(searchRes.data);
 
-        // PRECISION TARGETING: Find the first link that explicitly goes to a manga page
         const firstResult = $search('a[href^="/manga/"]').first().attr('href');
         
         if (!firstResult) {
@@ -60,20 +58,18 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const mangaUrl = `${PILL_BASE}${firstResult}`;
         console.log(`[Extractor] Target acquired: ${mangaUrl}`);
 
-        // 2. Fetch the Manga Page and slice out chapters
         const mangaRes = await axios.get(mangaUrl, { headers: stealthHeaders });
         const $manga = cheerio.load(mangaRes.data);
         
         let chapters = [];
         
-        // PRECISION TARGETING: Find all links that explicitly go to a chapter
-        $manga('a[href^="/chapter/"]').each((i, el) => {
+        // PRECISION TARGETING: Added the missing 's' right here!
+        $manga('a[href^="/chapters/"]').each((i, el) => {
             const chapUrl = $manga(el).attr('href');
             const chapText = $manga(el).text().trim().replace(/Chapter /i, '') || 'Oneshot';
             
             const safeId = Buffer.from(chapUrl).toString('base64');
             
-            // Prevent duplicates just in case MangaPill lists a chapter twice
             if (!chapters.find(c => c.id === safeId)) {
                 chapters.push({
                     id: safeId,
@@ -82,7 +78,6 @@ app.get('/api/scrape/chapters', async (req, res) => {
             }
         });
 
-        // MangaPill lists chapters newest first, let's reverse it so Chapter 1 is at the top
         chapters.reverse();
 
         console.log(`[Extractor] Success. Extracted ${chapters.length} chapters.`);
@@ -99,7 +94,6 @@ app.get('/api/scrape/images', async (req, res) => {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        // Decode the URL
         const targetPath = Buffer.from(chapterId, 'base64').toString('ascii');
         const chapUrl = `${PILL_BASE}${targetPath}`;
         
@@ -109,7 +103,6 @@ app.get('/api/scrape/images', async (req, res) => {
         
         let images = [];
         
-        // MangaPill lazy-loads images, grab data-src first, then fallback to src
         $('picture img, img[data-src]').each((i, el) => {
             const imgUrl = $(el).attr('data-src') || $(el).attr('src');
             if (imgUrl) images.push(imgUrl);
@@ -134,4 +127,3 @@ app.get('/', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Warrior.Nova standing guard on port ${PORT}`);
 });
-
