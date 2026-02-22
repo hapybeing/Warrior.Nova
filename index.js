@@ -8,7 +8,6 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// FIX 1: Tell the server to trust Render's proxy (Removes the giant error block)
 app.set('trust proxy', 1);
 
 // ==========================================
@@ -58,7 +57,6 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const cleanTitle = title.replace(/[^a-zA-Z0-9 ]/g, '').trim();
         const encoded = encodeURIComponent(cleanTitle);
 
-        // THE MULTI-BREACH: Fixed the typo and added .cc / .app
         const targets = [
             `https://api.comick.cc/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
             `https://api.comick.app/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
@@ -73,15 +71,19 @@ app.get('/api/scrape/chapters', async (req, res) => {
             try {
                 console.log(`[Battering Ram] Testing breach point: ${new URL(url).hostname}...`);
                 searchRes = await axios.get(url, { headers: stealthHeaders });
-                if (searchRes.data && searchRes.data.length > 0) {
+                
+                // Normalizes the data array depending on how Comick packed it
+                const dataArray = Array.isArray(searchRes.data) ? searchRes.data : searchRes.data.data;
+                
+                if (dataArray && dataArray.length > 0) {
                     successfulDomain = new URL(url).hostname;
+                    searchRes.data = dataArray; 
                     console.log(`[Battering Ram] Wall breached at ${successfulDomain}!`);
                     break; 
                 }
             } catch (e) {
-                // Now logs the specific error status (like 404 or 403) so we can see what happened
                 const status = e.response ? e.response.status : e.message;
-                console.log(`[Battering Ram] Point blocked at ${new URL(url).hostname} (Status: ${status}). Switching doors...`);
+                console.log(`[Battering Ram] Point blocked at ${new URL(url).hostname} (Status: ${status}).`);
             }
         }
 
@@ -90,10 +92,22 @@ app.get('/api/scrape/chapters', async (req, res) => {
             return res.json({ chapters: [], source: 'comick' });
         }
 
-        const targetHid = searchRes.data[0].hid;
+        const firstResult = searchRes.data[0];
+        
+        // INTERROGATION LOG: Shine a flashlight on the exact data
+        console.log(`[Battering Ram] Interrogation Log - Raw Data:`, JSON.stringify(firstResult));
+
+        // Intelligent ID Guessing
+        const targetHid = firstResult.hid || firstResult.slug || (firstResult.md_comics && firstResult.md_comics.hid) || firstResult.id;
+        
         console.log(`[Battering Ram] Target acquired. HID: ${targetHid}`);
 
-        // Extract Chapters from the successful domain
+        if (!targetHid) {
+             console.log(`[Battering Ram] Could not locate the HID nametag.`);
+             return res.json({ chapters: [], source: 'comick' });
+        }
+
+        // Extract Chapters
         const chapUrl = `https://${successfulDomain}/comic/${targetHid}/chapters?lang=en&limit=500&tachiyomi=true`;
         const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
         
@@ -149,7 +163,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Multi-Breach Comick Ram v2 Loaded",
+        weapons: "Multi-Breach Comick Ram v3 (Interrogation Mode)",
         shields: "Raised"
     });
 });
