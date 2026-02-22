@@ -4,7 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
-const cheerio = require('cheerio'); // The Scalpel is back
+const cheerio = require('cheerio'); // The Scalpel
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -29,7 +29,7 @@ app.use(limiter);
 app.use(express.json());
 
 // ==========================================
-// THE MANGAPILL EXTRACTOR
+// THE MANGAPILL EXTRACTOR (DIAGNOSTIC MODE)
 // ==========================================
 
 const PILL_BASE = 'https://mangapill.com';
@@ -47,13 +47,19 @@ app.get('/api/scrape/chapters', async (req, res) => {
         // 1. Search MangaPill's HTML
         const searchUrl = `${PILL_BASE}/search?q=${encodeURIComponent(title)}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
+        
+        // --- THE DIAGNOSTIC FLASHLIGHT ---
+        // This will print the first 300 characters of exactly what MangaPill handed us
+        console.log(`[Diagnostic] Raw HTML received:`, searchRes.data.substring(0, 300));
+        // ---------------------------------
+
         const $search = cheerio.load(searchRes.data);
 
         // Find the first manga result link
         const firstResult = $search('.grid a').first().attr('href');
         
         if (!firstResult) {
-            console.log(`[Extractor] Target not found on MangaPill.`);
+            console.log(`[Extractor] Target not found on MangaPill. (Check the diagnostic log above to see what they actually sent us!)`);
             return res.json({ chapters: [], source: 'mangapill' });
         }
 
@@ -124,7 +130,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "MangaPill HTML Extractor",
+        weapons: "MangaPill Extractor (Diagnostic Mode)",
         shields: "Raised"
     });
 });
