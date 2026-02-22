@@ -4,12 +4,10 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
-const cheerio = require('cheerio'); // The Scalpel
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Trust Render's proxy to prevent rate-limit crashes
 app.set('trust proxy', 1);
 
 // ==========================================
@@ -41,61 +39,58 @@ app.use(limiter);
 app.use(express.json());
 
 // ==========================================
-// THE GHOST PROXY V2: CORSPROXY + MANGANATO
+// THE ALLIANCE: CONSUMET NETWORK
 // ==========================================
+
+// We target Consumet's dedicated Manganato provider
+const CONSUMET_BASE = 'https://api.consumet.org/manga/manganato';
 
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
         if (!title) return res.status(400).json({ error: 'Target title required' });
 
-        console.log(`[Ghost Proxy V2] Engaging target: ${title}`);
+        console.log(`[The Alliance] Contacting Consumet Node for: ${title}`);
 
-        const searchTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
-        const targetUrl = `https://manganato.com/search/story/${searchTitle}`;
+        // 1. Ask Consumet to search their Manganato index
+        const searchRes = await axios.get(`${CONSUMET_BASE}/${encodeURIComponent(title)}`);
         
-        // NEW MASK: CorsProxy.io
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-        
-        console.log(`[Ghost Proxy V2] Routing search through CorsProxy...`);
-        
-        const searchRes = await axios.get(proxyUrl);
-        const $search = cheerio.load(searchRes.data);
-        
-        const firstResult = $search('.search-story-item a.item-title').first();
-        if (!firstResult.length) {
-            console.log(`[Ghost Proxy V2] Target not found.`);
-            return res.json({ chapters: [], source: 'manganato-proxy-v2' });
+        if (!searchRes.data.results || searchRes.data.results.length === 0) {
+            console.log(`[The Alliance] Target not found on network.`);
+            return res.json({ chapters: [], source: 'consumet-manganato' });
         }
 
-        const mangaUrl = firstResult.attr('href');
-        console.log(`[Ghost Proxy V2] Target acquired: ${mangaUrl}. Ripping chapters...`);
+        // Grab the exact ID of the first match
+        const targetId = searchRes.data.results[0].id;
+        console.log(`[The Alliance] Target acquired. ID: ${targetId}`);
 
-        const mangaProxyUrl = `https://corsproxy.io/?${encodeURIComponent(mangaUrl)}`;
-        const mangaRes = await axios.get(mangaProxyUrl);
-        const $manga = cheerio.load(mangaRes.data);
+        // 2. Ask Consumet for the chapter list of that exact ID
+        const infoRes = await axios.get(`${CONSUMET_BASE}/info?id=${targetId}`);
         
-        let chapters = [];
-        $manga('.row-content-chapter li a.chapter-name').each((i, el) => {
-            const chapNode = $manga(el);
-            let chapText = chapNode.text().replace(/Chapter/i, '').trim();
-            const chapUrl = chapNode.attr('href');
-            
-            const safeId = Buffer.from(chapUrl).toString('base64');
-            
-            chapters.push({
+        if (!infoRes.data.chapters) {
+            return res.json({ chapters: [], source: 'consumet-manganato' });
+        }
+
+        // Format the chapters so your frontend can read them perfectly
+        const chapters = infoRes.data.chapters.map(c => {
+            // Consumet hands us a clean chapter ID, we just encode it for safety
+            const safeId = Buffer.from(c.id).toString('base64');
+            // Extract the chapter number from titles like "Chapter 200"
+            const chapNum = c.title.replace(/[^0-9.]/g, '') || c.id; 
+
+            return {
                 id: safeId, 
-                attributes: { chapter: chapText, title: '' }
-            });
+                attributes: { chapter: chapNum, title: c.title || '' }
+            };
         });
 
-        console.log(`[Ghost Proxy V2] Success. Extracted ${chapters.length} chapters.`);
-        res.json({ chapters: chapters, source: 'manganato-proxy-v2' });
+        console.log(`[The Alliance] Success. Extracted ${chapters.length} chapters.`);
+        res.json({ chapters: chapters, source: 'consumet-manganato' });
 
     } catch (error) {
         const status = error.response ? error.response.status : error.message;
-        console.error(`[Ghost Proxy V2] Breach Failed (Status: ${status})`);
-        res.status(500).json({ error: 'Failed to breach target servers' });
+        console.error(`[The Alliance] Network Failure (Status: ${status})`);
+        res.status(500).json({ error: 'Failed to contact Alliance network' });
     }
 });
 
@@ -104,21 +99,21 @@ app.get('/api/scrape/images', async (req, res) => {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        const targetUrl = Buffer.from(chapterId, 'base64').toString('ascii');
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+        // Decode the ID we created earlier
+        const targetId = Buffer.from(chapterId, 'base64').toString('ascii');
         
-        console.log(`[Ghost Proxy V2] Ripping images for chapter...`);
-        const chapRes = await axios.get(proxyUrl);
-        const $ = cheerio.load(chapRes.data);
+        console.log(`[The Alliance] Ripping images for chapter...`);
+        const readRes = await axios.get(`${CONSUMET_BASE}/read?chapterId=${targetId}`);
         
-        let images = [];
-        $('.container-chapter-reader img').each((i, el) => {
-            images.push($(el).attr('src'));
-        });
+        if (readRes.data && readRes.data.length > 0) {
+            // Consumet returns an array of objects like { page: 1, img: "url" }
+            const images = readRes.data.map(page => page.img);
+            return res.json({ images });
+        }
         
-        res.json({ images });
+        res.json({ images: [] });
     } catch (error) {
-        console.error('[Ghost Proxy V2] Image Rip Failed:', error.message);
+        console.error('[The Alliance] Image Rip Failed:', error.message);
         res.status(500).json({ error: 'Failed to extract images' });
     }
 });
@@ -127,7 +122,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Ghost Proxy V2 (CorsProxy)",
+        weapons: "The Alliance (Consumet Network)",
         shields: "Raised"
     });
 });
