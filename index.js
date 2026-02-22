@@ -4,15 +4,12 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
+const cheerio = require('cheerio'); // The Scalpel returns
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.set('trust proxy', 1);
-
-// ==========================================
-// THE AEGIS PROTOCOL: SECURITY SYSTEM
-// ==========================================
 app.use(helmet());
 
 const allowedOrigins = [
@@ -38,13 +35,8 @@ const limiter = rateLimit({
 app.use(limiter);
 app.use(express.json());
 
-const stealthHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://comick.cc/'
-};
-
 // ==========================================
-// THE BATTERING RAM: COMICK API EXTRACTOR
+// THE GHOST PROXY: ALLORIGINS + MANGANATO
 // ==========================================
 
 app.get('/api/scrape/chapters', async (req, res) => {
@@ -52,109 +44,82 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const { title } = req.query;
         if (!title) return res.status(400).json({ error: 'Target title required' });
 
-        console.log(`[Battering Ram] Engaging Comick API for: ${title}`);
+        console.log(`[Ghost Proxy] Engaging target: ${title}`);
 
-        const cleanTitle = title.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-        const encoded = encodeURIComponent(cleanTitle);
-
-        const targets = [
-            `https://api.comick.cc/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
-            `https://api.comick.app/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
-            `https://api.comick.io/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
-            `https://api.comick.fun/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`
-        ];
-
-        let searchRes = null;
-        let successfulDomain = '';
-
-        for (const url of targets) {
-            try {
-                console.log(`[Battering Ram] Testing breach point: ${new URL(url).hostname}...`);
-                searchRes = await axios.get(url, { headers: stealthHeaders });
-                
-                // Normalizes the data array depending on how Comick packed it
-                const dataArray = Array.isArray(searchRes.data) ? searchRes.data : searchRes.data.data;
-                
-                if (dataArray && dataArray.length > 0) {
-                    successfulDomain = new URL(url).hostname;
-                    searchRes.data = dataArray; 
-                    console.log(`[Battering Ram] Wall breached at ${successfulDomain}!`);
-                    break; 
-                }
-            } catch (e) {
-                const status = e.response ? e.response.status : e.message;
-                console.log(`[Battering Ram] Point blocked at ${new URL(url).hostname} (Status: ${status}).`);
-            }
-        }
-
-        if (!searchRes || !searchRes.data || searchRes.data.length === 0) {
-            console.log(`[Battering Ram] All breach points failed or target missing.`);
-            return res.json({ chapters: [], source: 'comick' });
-        }
-
-        const firstResult = searchRes.data[0];
+        // 1. Format the target URL for Manganato
+        const searchTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
+        const targetUrl = `https://manganato.com/search/story/${searchTitle}`;
         
-        // INTERROGATION LOG: Shine a flashlight on the exact data
-        console.log(`[Battering Ram] Interrogation Log - Raw Data:`, JSON.stringify(firstResult));
-
-        // Intelligent ID Guessing
-        const targetHid = firstResult.hid || firstResult.slug || (firstResult.md_comics && firstResult.md_comics.hid) || firstResult.id;
+        // 2. Wrap the target URL in the AllOrigins Ghost Proxy to bypass Cloudflare
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
         
-        console.log(`[Battering Ram] Target acquired. HID: ${targetHid}`);
-
-        if (!targetHid) {
-             console.log(`[Battering Ram] Could not locate the HID nametag.`);
-             return res.json({ chapters: [], source: 'comick' });
+        console.log(`[Ghost Proxy] Routing search through AllOrigins...`);
+        const searchRes = await axios.get(proxyUrl);
+        
+        // AllOrigins hides the HTML inside the "contents" property
+        const html = searchRes.data.contents;
+        const $search = cheerio.load(html);
+        
+        const firstResult = $search('.search-story-item a.item-title').first();
+        if (!firstResult.length) {
+            console.log(`[Ghost Proxy] Target not found.`);
+            return res.json({ chapters: [], source: 'manganato-proxy' });
         }
 
-        // Extract Chapters
-        const chapUrl = `https://${successfulDomain}/comic/${targetHid}/chapters?lang=en&limit=500&tachiyomi=true`;
-        const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
+        const mangaUrl = firstResult.attr('href');
+        console.log(`[Ghost Proxy] Target acquired: ${mangaUrl}. Ripping chapters...`);
+
+        // 3. Route the chapter page through the Ghost Proxy as well
+        const mangaProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(mangaUrl)}`;
+        const mangaRes = await axios.get(mangaProxyUrl);
+        const $manga = cheerio.load(mangaRes.data.contents);
         
         let chapters = [];
-        if (chapRes.data && chapRes.data.chapters) {
-            const seen = new Set();
-            chapters = chapRes.data.chapters.filter(c => {
-                if (!c.chap) return true;
-                if (seen.has(c.chap)) return false;
-                seen.add(c.chap);
-                return true;
-            }).map(c => ({
-                id: c.hid, 
-                attributes: { chapter: c.chap, title: c.title || '' }
-            }));
-        }
+        $manga('.row-content-chapter li a.chapter-name').each((i, el) => {
+            const chapNode = $manga(el);
+            let chapText = chapNode.text().replace(/Chapter/i, '').trim();
+            const chapUrl = chapNode.attr('href');
+            
+            // Encode the URL so it travels safely to your frontend
+            const safeId = Buffer.from(chapUrl).toString('base64');
+            
+            chapters.push({
+                id: safeId, 
+                attributes: { chapter: chapText, title: '' }
+            });
+        });
 
-        console.log(`[Battering Ram] Success. Extracted ${chapters.length} chapters.`);
-        res.json({ chapters: chapters, source: 'comick' });
+        console.log(`[Ghost Proxy] Success. Extracted ${chapters.length} chapters.`);
+        res.json({ chapters: chapters, source: 'manganato-proxy' });
 
     } catch (error) {
-        console.error('[Battering Ram] Critical System Failure:', error.message);
+        console.error('[Ghost Proxy] Breach Failed:', error.message);
         res.status(500).json({ error: 'Failed to breach target servers' });
     }
 });
 
+// Steal the actual image links through the proxy
 app.get('/api/scrape/images', async (req, res) => {
     try {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        const domains = ['api.comick.cc', 'api.comick.app', 'api.comick.io', 'api.comick.fun'];
-        let chapRes = null;
-
-        for (const domain of domains) {
-            try {
-                chapRes = await axios.get(`https://${domain}/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
-                if (chapRes.data && chapRes.data.chapter) break;
-            } catch (e) {}
-        }
+        // Decode the URL we passed from the frontend
+        const targetUrl = Buffer.from(chapterId, 'base64').toString('ascii');
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
         
-        if (chapRes && chapRes.data && chapRes.data.chapter && chapRes.data.chapter.images) {
-            const images = chapRes.data.chapter.images.map(img => img.url);
-            return res.json({ images });
-        }
-        res.json({ images: [] });
+        console.log(`[Ghost Proxy] Ripping images for chapter...`);
+        const chapRes = await axios.get(proxyUrl);
+        const $ = cheerio.load(chapRes.data.contents);
+        
+        let images = [];
+        $('.container-chapter-reader img').each((i, el) => {
+            images.push($(el).attr('src'));
+        });
+        
+        res.json({ images });
     } catch (error) {
+        console.error('[Ghost Proxy] Image Rip Failed:', error.message);
         res.status(500).json({ error: 'Failed to extract images' });
     }
 });
@@ -163,7 +128,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Multi-Breach Comick Ram v3 (Interrogation Mode)",
+        weapons: "Ghost Proxy (AllOrigins + Manganato)",
         shields: "Raised"
     });
 });
