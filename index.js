@@ -4,12 +4,17 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
-const cheerio = require('cheerio'); // The Scalpel returns
+const cheerio = require('cheerio'); // The Scalpel
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// Trust Render's proxy to prevent rate-limit crashes
 app.set('trust proxy', 1);
+
+// ==========================================
+// THE AEGIS PROTOCOL: SECURITY SYSTEM
+// ==========================================
 app.use(helmet());
 
 const allowedOrigins = [
@@ -36,7 +41,7 @@ app.use(limiter);
 app.use(express.json());
 
 // ==========================================
-// THE GHOST PROXY: ALLORIGINS + MANGANATO
+// THE GHOST PROXY V2: CORSPROXY + MANGANATO
 // ==========================================
 
 app.get('/api/scrape/chapters', async (req, res) => {
@@ -44,35 +49,31 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const { title } = req.query;
         if (!title) return res.status(400).json({ error: 'Target title required' });
 
-        console.log(`[Ghost Proxy] Engaging target: ${title}`);
+        console.log(`[Ghost Proxy V2] Engaging target: ${title}`);
 
-        // 1. Format the target URL for Manganato
         const searchTitle = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/_+$/, '');
         const targetUrl = `https://manganato.com/search/story/${searchTitle}`;
         
-        // 2. Wrap the target URL in the AllOrigins Ghost Proxy to bypass Cloudflare
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        // NEW MASK: CorsProxy.io
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
         
-        console.log(`[Ghost Proxy] Routing search through AllOrigins...`);
+        console.log(`[Ghost Proxy V2] Routing search through CorsProxy...`);
+        
         const searchRes = await axios.get(proxyUrl);
-        
-        // AllOrigins hides the HTML inside the "contents" property
-        const html = searchRes.data.contents;
-        const $search = cheerio.load(html);
+        const $search = cheerio.load(searchRes.data);
         
         const firstResult = $search('.search-story-item a.item-title').first();
         if (!firstResult.length) {
-            console.log(`[Ghost Proxy] Target not found.`);
-            return res.json({ chapters: [], source: 'manganato-proxy' });
+            console.log(`[Ghost Proxy V2] Target not found.`);
+            return res.json({ chapters: [], source: 'manganato-proxy-v2' });
         }
 
         const mangaUrl = firstResult.attr('href');
-        console.log(`[Ghost Proxy] Target acquired: ${mangaUrl}. Ripping chapters...`);
+        console.log(`[Ghost Proxy V2] Target acquired: ${mangaUrl}. Ripping chapters...`);
 
-        // 3. Route the chapter page through the Ghost Proxy as well
-        const mangaProxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(mangaUrl)}`;
+        const mangaProxyUrl = `https://corsproxy.io/?${encodeURIComponent(mangaUrl)}`;
         const mangaRes = await axios.get(mangaProxyUrl);
-        const $manga = cheerio.load(mangaRes.data.contents);
+        const $manga = cheerio.load(mangaRes.data);
         
         let chapters = [];
         $manga('.row-content-chapter li a.chapter-name').each((i, el) => {
@@ -80,7 +81,6 @@ app.get('/api/scrape/chapters', async (req, res) => {
             let chapText = chapNode.text().replace(/Chapter/i, '').trim();
             const chapUrl = chapNode.attr('href');
             
-            // Encode the URL so it travels safely to your frontend
             const safeId = Buffer.from(chapUrl).toString('base64');
             
             chapters.push({
@@ -89,28 +89,27 @@ app.get('/api/scrape/chapters', async (req, res) => {
             });
         });
 
-        console.log(`[Ghost Proxy] Success. Extracted ${chapters.length} chapters.`);
-        res.json({ chapters: chapters, source: 'manganato-proxy' });
+        console.log(`[Ghost Proxy V2] Success. Extracted ${chapters.length} chapters.`);
+        res.json({ chapters: chapters, source: 'manganato-proxy-v2' });
 
     } catch (error) {
-        console.error('[Ghost Proxy] Breach Failed:', error.message);
+        const status = error.response ? error.response.status : error.message;
+        console.error(`[Ghost Proxy V2] Breach Failed (Status: ${status})`);
         res.status(500).json({ error: 'Failed to breach target servers' });
     }
 });
 
-// Steal the actual image links through the proxy
 app.get('/api/scrape/images', async (req, res) => {
     try {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        // Decode the URL we passed from the frontend
         const targetUrl = Buffer.from(chapterId, 'base64').toString('ascii');
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
         
-        console.log(`[Ghost Proxy] Ripping images for chapter...`);
+        console.log(`[Ghost Proxy V2] Ripping images for chapter...`);
         const chapRes = await axios.get(proxyUrl);
-        const $ = cheerio.load(chapRes.data.contents);
+        const $ = cheerio.load(chapRes.data);
         
         let images = [];
         $('.container-chapter-reader img').each((i, el) => {
@@ -119,7 +118,7 @@ app.get('/api/scrape/images', async (req, res) => {
         
         res.json({ images });
     } catch (error) {
-        console.error('[Ghost Proxy] Image Rip Failed:', error.message);
+        console.error('[Ghost Proxy V2] Image Rip Failed:', error.message);
         res.status(500).json({ error: 'Failed to extract images' });
     }
 });
@@ -128,7 +127,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Ghost Proxy (AllOrigins + Manganato)",
+        weapons: "Ghost Proxy V2 (CorsProxy)",
         shields: "Raised"
     });
 });
