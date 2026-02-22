@@ -8,6 +8,9 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// FIX 1: Tell the server to trust Render's proxy (Removes the giant error block)
+app.set('trust proxy', 1);
+
 // ==========================================
 // THE AEGIS PROTOCOL: SECURITY SYSTEM
 // ==========================================
@@ -38,7 +41,7 @@ app.use(express.json());
 
 const stealthHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-    'Referer': 'https://comick.io/'
+    'Referer': 'https://comick.cc/'
 };
 
 // ==========================================
@@ -55,11 +58,12 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const cleanTitle = title.replace(/[^a-zA-Z0-9 ]/g, '').trim();
         const encoded = encodeURIComponent(cleanTitle);
 
-        // THE MULTI-BREACH: Tests every known domain and uses the Tachiyomi disguise
+        // THE MULTI-BREACH: Fixed the typo and added .cc / .app
         const targets = [
-            `https://api.comick.io/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`,
-            `https://api.comick.dev/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`,
-            `https://api.comick.fun/v1.0/search/?q=${encoded}&limit=1&tachiyomi=true`
+            `https://api.comick.cc/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
+            `https://api.comick.app/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
+            `https://api.comick.io/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`,
+            `https://api.comick.fun/v1.0/search?q=${encoded}&limit=1&tachiyomi=true`
         ];
 
         let searchRes = null;
@@ -75,7 +79,9 @@ app.get('/api/scrape/chapters', async (req, res) => {
                     break; 
                 }
             } catch (e) {
-                console.log(`[Battering Ram] Point blocked (404/403). Switching doors...`);
+                // Now logs the specific error status (like 404 or 403) so we can see what happened
+                const status = e.response ? e.response.status : e.message;
+                console.log(`[Battering Ram] Point blocked at ${new URL(url).hostname} (Status: ${status}). Switching doors...`);
             }
         }
 
@@ -87,7 +93,7 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const targetHid = searchRes.data[0].hid;
         console.log(`[Battering Ram] Target acquired. HID: ${targetHid}`);
 
-        // Extract Chapters from the domain that worked
+        // Extract Chapters from the successful domain
         const chapUrl = `https://${successfulDomain}/comic/${targetHid}/chapters?lang=en&limit=500&tachiyomi=true`;
         const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
         
@@ -119,14 +125,17 @@ app.get('/api/scrape/images', async (req, res) => {
         const { chapterId } = req.query;
         if (!chapterId) return res.status(400).json({ error: 'Chapter ID required' });
 
-        let chapRes;
-        try {
-            chapRes = await axios.get(`https://api.comick.io/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
-        } catch (e) {
-            chapRes = await axios.get(`https://api.comick.dev/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
+        const domains = ['api.comick.cc', 'api.comick.app', 'api.comick.io', 'api.comick.fun'];
+        let chapRes = null;
+
+        for (const domain of domains) {
+            try {
+                chapRes = await axios.get(`https://${domain}/chapter/${chapterId}?tachiyomi=true`, { headers: stealthHeaders });
+                if (chapRes.data && chapRes.data.chapter) break;
+            } catch (e) {}
         }
         
-        if (chapRes.data && chapRes.data.chapter && chapRes.data.chapter.images) {
+        if (chapRes && chapRes.data && chapRes.data.chapter && chapRes.data.chapter.images) {
             const images = chapRes.data.chapter.images.map(img => img.url);
             return res.json({ images });
         }
@@ -140,7 +149,7 @@ app.get('/', (req, res) => {
     res.json({
         status: "Warrior.Nova is online.",
         armor: "Active",
-        weapons: "Multi-Breach Comick Ram Loaded",
+        weapons: "Multi-Breach Comick Ram v2 Loaded",
         shields: "Raised"
     });
 });
