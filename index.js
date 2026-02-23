@@ -46,36 +46,34 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $search = cheerio.load(searchRes.data);
 
-        // === THE SMART TITLE MATCHER ===
-        // Break the search title into lowercase words, ignoring symbols
+        // === THE HIGH SCORE MATCHER ===
         const searchWords = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(' ').filter(w => w.length > 2);
         
         let targetHref = null;
+        let highestMatchScore = 0;
 
         $search('a[href^="/manga/"]').each((i, el) => {
             const href = $search(el).attr('href');
             const hrefLower = href.toLowerCase();
             
-            if (searchWords.length === 0) return;
+            // Exclude novel versions
+            if (hrefLower.includes('-novel')) return;
 
-            // Check how many words from the title are actually in the manga's URL
-            let matchCount = 0;
+            let matchScore = 0;
             searchWords.forEach(word => {
                 if (hrefLower.includes(word)) {
-                    matchCount++;
+                    matchScore++;
                 }
             });
 
-            // If we found a match and haven't locked onto a target yet
-            // We also actively avoid the text "-novel" version unless necessary
-            if (matchCount > 0 && !targetHref) {
-                if (!hrefLower.includes('-novel')) {
-                    targetHref = href;
-                }
+            // Lock onto the link with the absolute highest number of matching words
+            if (matchScore > highestMatchScore) {
+                highestMatchScore = matchScore;
+                targetHref = href;
             }
         });
 
-        // If the smart matcher found nothing, it means MangaPill doesn't have it under that exact name
+        // If no words matched, the manga isn't on the site under that name
         if (!targetHref) {
             console.log(`[Extractor] Target "${title}" not found on MangaPill database.`);
             return res.json({ chapters: [], source: 'mangapill' });
