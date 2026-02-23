@@ -18,11 +18,13 @@ const stealthHeaders = {
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
-        const searchUrl = `https://manganato.com/search/story/${title.toLowerCase().replace(/ /g, '_')}`;
+        // Search Manganato with a more flexible query
+        const searchUrl = `https://manganato.com/search/story/${title.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $ = cheerio.load(searchRes.data);
-        const firstResult = $('.search-story-item a.item-title').first().attr('href');
         
+        // Find the best link in the search results
+        const firstResult = $('.search-story-item a.item-title').first().attr('href');
         if (!firstResult) return res.json({ chapters: [] });
 
         const mangaRes = await axios.get(firstResult, { headers: stealthHeaders });
@@ -48,7 +50,8 @@ app.get('/api/scrape/images', async (req, res) => {
         const $ = cheerio.load(resHtml.data);
         let images = [];
         $('.container-chapter-reader img').each((i, el) => {
-            if ($(el).attr('src')) images.push($(el).attr('src'));
+            const src = $(el).attr('src');
+            if (src) images.push(src);
         });
         res.json({ images });
     } catch (e) { res.status(500).json({ error: 'Failed' }); }
@@ -65,4 +68,4 @@ app.get('/api/proxy/image', async (req, res) => {
     } catch (e) { res.status(500).send('Failed'); }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Fortress Online`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Aggregator Online`));
