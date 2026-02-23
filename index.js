@@ -46,10 +46,44 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $search = cheerio.load(searchRes.data);
 
-        const firstResult = $search('a[href^="/manga/"]').first().attr('href');
-        if (!firstResult) return res.json({ chapters: [], source: 'mangapill' });
+        // === THE SMART TITLE MATCHER ===
+        // Break the search title into lowercase words, ignoring symbols
+        const searchWords = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(' ').filter(w => w.length > 2);
+        
+        let targetHref = null;
 
-        const mangaUrl = `${PILL_BASE}${firstResult}`;
+        $search('a[href^="/manga/"]').each((i, el) => {
+            const href = $search(el).attr('href');
+            const hrefLower = href.toLowerCase();
+            
+            if (searchWords.length === 0) return;
+
+            // Check how many words from the title are actually in the manga's URL
+            let matchCount = 0;
+            searchWords.forEach(word => {
+                if (hrefLower.includes(word)) {
+                    matchCount++;
+                }
+            });
+
+            // If we found a match and haven't locked onto a target yet
+            // We also actively avoid the text "-novel" version unless necessary
+            if (matchCount > 0 && !targetHref) {
+                if (!hrefLower.includes('-novel')) {
+                    targetHref = href;
+                }
+            }
+        });
+
+        // If the smart matcher found nothing, it means MangaPill doesn't have it under that exact name
+        if (!targetHref) {
+            console.log(`[Extractor] Target "${title}" not found on MangaPill database.`);
+            return res.json({ chapters: [], source: 'mangapill' });
+        }
+
+        const mangaUrl = `${PILL_BASE}${targetHref}`;
+        console.log(`[Extractor] Locked onto true target: ${mangaUrl}`);
+
         const mangaRes = await axios.get(mangaUrl, { headers: stealthHeaders });
         const $manga = cheerio.load(mangaRes.data);
         
@@ -105,7 +139,6 @@ app.get('/api/proxy/image', async (req, res) => {
         const { url } = req.query;
         if (!url) return res.status(400).send('URL required');
 
-        // Forge the request to look like it's coming directly from MangaPill
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
             headers: { 
