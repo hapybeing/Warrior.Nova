@@ -10,13 +10,12 @@ const PORT = process.env.PORT || 10000;
 app.use(cors({ origin: 'https://nova-iota-gules.vercel.app' }));
 app.use(express.json());
 
-const N_BASE = 'https://manganato.com';
 const stealthHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
     'Referer': 'https://manganato.com/'
 };
 
-// SEARCH & CHAPTER EXTRACTOR
+// MULTI-SOURCE CHAPTER EXTRACTOR
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
@@ -59,7 +58,7 @@ app.get('/api/scrape/images', async (req, res) => {
     } catch (e) { res.status(500).json({ error: 'Rip failed' }); }
 });
 
-// THE AEGIS PROXY (Shatters Hotlink Protection)
+// THE PROXY SHIELD (Force-feeding images past ISP blocks)
 app.get('/api/proxy/image', async (req, res) => {
     try {
         const response = await axios.get(req.query.url, {
