@@ -4,13 +4,13 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
-const cheerio = require('cheerio'); // The Scalpel
+const cheerio = require('cheerio'); 
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 app.set('trust proxy', 1);
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false })); // Crucial for image proxying
 
 // ==========================================
 // THE AEGIS PROTOCOL
@@ -42,45 +42,29 @@ app.get('/api/scrape/chapters', async (req, res) => {
         const { title } = req.query;
         if (!title) return res.status(400).json({ error: 'Target title required' });
 
-        console.log(`[Extractor] Searching MangaPill for: ${title}`);
-
         const searchUrl = `${PILL_BASE}/search?q=${encodeURIComponent(title)}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $search = cheerio.load(searchRes.data);
 
         const firstResult = $search('a[href^="/manga/"]').first().attr('href');
-        
-        if (!firstResult) {
-            console.log(`[Extractor] Target not found on MangaPill.`);
-            return res.json({ chapters: [], source: 'mangapill' });
-        }
+        if (!firstResult) return res.json({ chapters: [], source: 'mangapill' });
 
         const mangaUrl = `${PILL_BASE}${firstResult}`;
-        console.log(`[Extractor] Target acquired: ${mangaUrl}`);
-
         const mangaRes = await axios.get(mangaUrl, { headers: stealthHeaders });
         const $manga = cheerio.load(mangaRes.data);
         
         let chapters = [];
-        
-        // PRECISION TARGETING: Added the missing 's' right here!
         $manga('a[href^="/chapters/"]').each((i, el) => {
             const chapUrl = $manga(el).attr('href');
             const chapText = $manga(el).text().trim().replace(/Chapter /i, '') || 'Oneshot';
-            
             const safeId = Buffer.from(chapUrl).toString('base64');
             
             if (!chapters.find(c => c.id === safeId)) {
-                chapters.push({
-                    id: safeId,
-                    attributes: { chapter: chapText, title: '' }
-                });
+                chapters.push({ id: safeId, attributes: { chapter: chapText, title: '' } });
             }
         });
 
         chapters.reverse();
-
-        console.log(`[Extractor] Success. Extracted ${chapters.length} chapters.`);
         res.json({ chapters: chapters, source: 'mangapill' });
 
     } catch (error) {
@@ -97,12 +81,10 @@ app.get('/api/scrape/images', async (req, res) => {
         const targetPath = Buffer.from(chapterId, 'base64').toString('ascii');
         const chapUrl = `${PILL_BASE}${targetPath}`;
         
-        console.log(`[Extractor] Ripping images from ${chapUrl}...`);
         const chapRes = await axios.get(chapUrl, { headers: stealthHeaders });
         const $ = cheerio.load(chapRes.data);
         
         let images = [];
-        
         $('picture img, img[data-src]').each((i, el) => {
             const imgUrl = $(el).attr('data-src') || $(el).attr('src');
             if (imgUrl) images.push(imgUrl);
@@ -115,13 +97,33 @@ app.get('/api/scrape/images', async (req, res) => {
     }
 });
 
+// ==========================================
+// THE IMAGE SHIELD (HOTLINK BYPASS)
+// ==========================================
+app.get('/api/proxy/image', async (req, res) => {
+    try {
+        const { url } = req.query;
+        if (!url) return res.status(400).send('URL required');
+
+        // Forge the request to look like it's coming directly from MangaPill
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: { 
+                'Referer': 'https://mangapill.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+
+        res.set('Content-Type', response.headers['content-type']);
+        res.send(response.data);
+    } catch (error) {
+        console.error('[Proxy] Image Shield Failed:', error.message);
+        res.status(500).send('Image Proxy Failed');
+    }
+});
+
 app.get('/', (req, res) => {
-    res.json({
-        status: "Warrior.Nova is online.",
-        armor: "Active",
-        weapons: "MangaPill Precision Extractor",
-        shields: "Raised"
-    });
+    res.json({ status: "Warrior.Nova is online.", armor: "Active", shields: "Proxy Active" });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
