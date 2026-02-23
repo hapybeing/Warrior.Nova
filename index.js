@@ -15,21 +15,18 @@ const stealthHeaders = {
     'Referer': 'https://manganato.com/'
 };
 
-// MULTI-SOURCE CHAPTER EXTRACTOR
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
-        // Search Manganato with underscores
         const searchUrl = `https://manganato.com/search/story/${title.toLowerCase().replace(/ /g, '_')}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
         const $ = cheerio.load(searchRes.data);
-
         const firstResult = $('.search-story-item a.item-title').first().attr('href');
+        
         if (!firstResult) return res.json({ chapters: [] });
 
         const mangaRes = await axios.get(firstResult, { headers: stealthHeaders });
         const $manga = cheerio.load(mangaRes.data);
-        
         let chapters = [];
         $('.row-content-chapter li a').each((i, el) => {
             const url = $(el).attr('href');
@@ -41,10 +38,9 @@ app.get('/api/scrape/chapters', async (req, res) => {
             });
         });
         res.json({ chapters });
-    } catch (e) { res.status(500).json({ error: 'War Engine error' }); }
+    } catch (e) { res.status(500).json({ error: 'Failed' }); }
 });
 
-// IMAGE EXTRACTOR
 app.get('/api/scrape/images', async (req, res) => {
     try {
         const target = Buffer.from(req.query.chapterId, 'base64').toString('ascii');
@@ -55,10 +51,9 @@ app.get('/api/scrape/images', async (req, res) => {
             if ($(el).attr('src')) images.push($(el).attr('src'));
         });
         res.json({ images });
-    } catch (e) { res.status(500).json({ error: 'Rip failed' }); }
+    } catch (e) { res.status(500).json({ error: 'Failed' }); }
 });
 
-// THE PROXY SHIELD (Force-feeding images past ISP blocks)
 app.get('/api/proxy/image', async (req, res) => {
     try {
         const response = await axios.get(req.query.url, {
@@ -67,7 +62,7 @@ app.get('/api/proxy/image', async (req, res) => {
         });
         res.set('Content-Type', response.headers['content-type']);
         res.send(response.data);
-    } catch (e) { res.status(500).send('Proxy failed'); }
+    } catch (e) { res.status(500).send('Failed'); }
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Fortress Online`));
