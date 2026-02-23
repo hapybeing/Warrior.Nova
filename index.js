@@ -1,15 +1,12 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
 const axios = require('axios');
-const cheerio = require('cheerio'); 
+const cheerio = require('cheerio');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-app.set('trust proxy', 1);
-app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({ origin: 'https://nova-iota-gules.vercel.app' }));
 app.use(express.json());
 
@@ -19,77 +16,59 @@ const stealthHeaders = {
     'Referer': 'https://manganato.com/'
 };
 
+// SEARCH & CHAPTER EXTRACTOR
 app.get('/api/scrape/chapters', async (req, res) => {
     try {
         const { title } = req.query;
-        if (!title) return res.status(400).json({ error: 'Title required' });
-
-        // 1. Search Manganato
+        // Search Manganato with underscores
         const searchUrl = `https://manganato.com/search/story/${title.toLowerCase().replace(/ /g, '_')}`;
         const searchRes = await axios.get(searchUrl, { headers: stealthHeaders });
-        const $search = cheerio.load(searchRes.data);
+        const $ = cheerio.load(searchRes.data);
 
-        // Find the most relevant search result
-        const firstResult = $search('.search-story-item a.item-title').first().attr('href');
-        
-        if (!firstResult) {
-            return res.json({ chapters: [], source: 'manganato' });
-        }
+        const firstResult = $('.search-story-item a.item-title').first().attr('href');
+        if (!firstResult) return res.json({ chapters: [] });
 
-        // 2. Fetch Chapters
         const mangaRes = await axios.get(firstResult, { headers: stealthHeaders });
         const $manga = cheerio.load(mangaRes.data);
         
         let chapters = [];
-        $manga('.row-content-chapter li a').each((i, el) => {
-            const chapUrl = $manga(el).attr('href');
-            const chapName = $manga(el).text().trim();
-            const safeId = Buffer.from(chapUrl).toString('base64');
-            
+        $('.row-content-chapter li a').each((i, el) => {
+            const url = $(el).attr('href');
+            const name = $(el).text().trim();
             chapters.push({
-                id: safeId,
-                attributes: { chapter: chapName.match(/\d+/)?.[0] || '?', title: chapName }
+                id: Buffer.from(url).toString('base64'),
+                num: name.match(/\d+(\.\d+)?/)?.[0] || '?',
+                title: name
             });
         });
-
         res.json({ chapters });
-    } catch (error) {
-        res.status(500).json({ error: 'Scrape failed' });
-    }
+    } catch (e) { res.status(500).json({ error: 'War Engine error' }); }
 });
 
+// IMAGE EXTRACTOR
 app.get('/api/scrape/images', async (req, res) => {
     try {
-        const { chapterId } = req.query;
-        const targetUrl = Buffer.from(chapterId, 'base64').toString('ascii');
-        
-        const chapRes = await axios.get(targetUrl, { headers: stealthHeaders });
-        const $ = cheerio.load(chapRes.data);
-        
+        const target = Buffer.from(req.query.chapterId, 'base64').toString('ascii');
+        const resHtml = await axios.get(target, { headers: stealthHeaders });
+        const $ = cheerio.load(resHtml.data);
         let images = [];
         $('.container-chapter-reader img').each((i, el) => {
-            const imgUrl = $(el).attr('src');
-            if (imgUrl) images.push(imgUrl);
+            if ($(el).attr('src')) images.push($(el).attr('src'));
         });
-        
         res.json({ images });
-    } catch (error) {
-        res.status(500).json({ error: 'Image rip failed' });
-    }
+    } catch (e) { res.status(500).json({ error: 'Rip failed' }); }
 });
 
+// THE AEGIS PROXY (Shatters Hotlink Protection)
 app.get('/api/proxy/image', async (req, res) => {
     try {
-        const { url } = req.query;
-        const response = await axios.get(url, {
+        const response = await axios.get(req.query.url, {
             responseType: 'arraybuffer',
             headers: { 'Referer': 'https://chapmanganato.to/' }
         });
         res.set('Content-Type', response.headers['content-type']);
         res.send(response.data);
-    } catch (error) {
-        res.status(500).send('Proxy failed');
-    }
+    } catch (e) { res.status(500).send('Proxy failed'); }
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Aggregator Online`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Fortress Online`));
